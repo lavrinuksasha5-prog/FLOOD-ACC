@@ -26,6 +26,14 @@ async def upload_sessions(file: UploadFile = File(...)):
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": len(files)}
 
+# 🔥 НОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ ФАЙЛА
+@app.post("/upload/usernames_file")
+async def upload_usernames_file(file: UploadFile = File(...)):
+    content = await file.read()
+    with open("usernames.txt", "wb") as f:
+        f.write(content)
+    return {"status": "ok"}
+
 @app.post("/upload/usernames")
 async def upload_usernames(usernames: str = Form(...)):
     with open("usernames.txt", "w", encoding="utf-8") as f: f.write(usernames)
@@ -40,7 +48,6 @@ async def run_check_background(mode: str):
         with open("proxies.txt") as f: proxies = [l.strip() for l in f if l.strip()]
     try:
         async def update_result(res):
-            # Обновляем по ключу (имя файла сессии), чтобы не было дублей
             _results[res["session"]] = res
         await checker.check_all("sessions", proxies, mode, update_result)
     except Exception as e:
@@ -57,5 +64,4 @@ async def run_check(background_tasks: BackgroundTasks, mode: str = Query("flood"
 
 @app.get("/results")
 async def get_results():
-    # Возвращаем список значений из словаря
     return JSONResponse({"running": _running, "results": list(_results.values())})
