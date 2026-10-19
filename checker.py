@@ -43,42 +43,59 @@ async def check_one(session_path: str, proxy: dict | None, usernames_list: list,
         result["country"] = get_country_code(result["phone"])
         await update_callback(result)
 
+        # Берем случайные 10 из базы
         test_users = random.sample(usernames_list, min(USERS_PER_ACCOUNT, len(usernames_list)))
         checked_count = 0
         
         for target_user in test_users:
-            try:
-                print(f"[{result['session']}] Ищу @{target_user}...")
-                await client(functions.contacts.ResolveUsernameRequest(username=target_user))
+            success = False
+            for attempt in range(3):
+                try:
+                    print(f"[{result['session']}] Ищу @{target_user} (попытка {attempt+1}/3)...")
+                    await client(functions.contacts.ResolveUsernameRequest(username=target_user))
+                    success = True
+                    break
+                except errors.FloodWaitError as e:
+                    result["status"] = "FLOOD"
+                    result["wait_seconds"] = e.seconds
+                    result["note"] = f"Флуд на {checked_count + 1}-м"
+                    await update_callback(result)
+                    return result
+                except errors.PeerFloodError:
+                    result["status"] = "PEER_FLOOD"
+                    result["note"] = f"Запрет (на {checked_count + 1}-м)"
+                    await update_callback(result)
+                    return result
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    print(f"[{result['session']}] Сетевая ошибка (@{target_user}), попытка {attempt+1}/3. Ждем 3 сек...")
+                    if attempt < 2:
+                        await asyncio.sleep(3.0)
+                except errors.rpcerrorlist.UsernameNotOccupiedError:
+                    # Юзер удален, просто пропускаем
+                    success = False 
+                    break
+                except Exception as e:
+                    print(f"[{result['session']}] Ошибка @{target_user}: {type(e).__name__}")
+                    success = False
+                    break
+            
+            if success:
                 checked_count += 1
-                
                 result["note"] = f"{checked_count}/{len(test_users)}"
                 await update_callback(result)
                 
+                if checked_count >= USERS_PER_ACCOUNT:
+                    break
+                
+                # Спим 30-61 секунду
                 if checked_count < len(test_users):
                     delay = random.uniform(30.0, 61.0)
                     print(f"[{result['session']}] Сплю {int(delay)} сек...")
                     await asyncio.sleep(delay)
-                    
-            except errors.FloodWaitError as e:
-                result["status"] = "FLOOD"
-                result["wait_seconds"] = e.seconds
-                result["note"] = f"Флуд на {checked_count + 1}-м"
-                await update_callback(result)
-                break
-            except errors.PeerFloodError:
-                result["status"] = "PEER_FLOOD"
-                result["note"] = f"Запрет (на {checked_count + 1}-м)"
-                await update_callback(result)
-                break
-            except Exception as e:
-                result["note"] = f"Ошб: {type(e).__name__}"
-                await update_callback(result)
-                break 
         
         if result["status"] == "Проверяю...":
             result["status"] = "OK"
-            result["note"] = f"Найдено {checked_count}/{len(test_users)}"
+            result["note"] = f"Найдено {checked_count}/{USERS_PER_ACCOUNT}"
 
     except errors.AuthKeyUnregisteredError:
         result["status"] = "DEAD"
