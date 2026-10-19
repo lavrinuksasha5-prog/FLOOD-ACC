@@ -32,8 +32,13 @@
   <div id="sessionStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
   <h3>3. База юзернеймов</h3>
+  <input type="file" id="usernamesFile" accept=".txt" style="margin-bottom: 8px; color: #fff;">
+  <button class="btn-upload" onclick="uploadUsernamesFile()">Загрузить файл базы</button>
+  
+  <div style="text-align:center; margin: 5px 0; font-size: 12px; color: #888;">ИЛИ вставить текстом:</div>
+  
   <textarea id="usernames" placeholder="username1&#10;username2"></textarea>
-  <button class="btn-upload" onclick="uploadUsernames()">Загрузить базу</button>
+  <button class="btn-upload" onclick="uploadUsernames()">Загрузить текстом</button>
   <div id="usernameStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
   <h3>4. Проверка</h3>
@@ -71,12 +76,22 @@ async function uploadSessions() {
   document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions} сессий.`;
 }
 
+async function uploadUsernamesFile() {
+  const fileInput = document.getElementById("usernamesFile");
+  if (!fileInput.files.length) return alert("Выбери TXT файл");
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  document.getElementById("usernameStatus").innerText = "Загрузка...";
+  await fetch("/upload/usernames_file", { method: "POST", body: formData });
+  document.getElementById("usernameStatus").innerText = "Файл базы загружен!";
+}
+
 async function uploadUsernames() {
   const text = document.getElementById("usernames").value;
   const formData = new FormData();
   formData.append("usernames", text);
   await fetch("/upload/usernames", { method: "POST", body: formData });
-  document.getElementById("usernameStatus").innerText = "База загружена!";
+  document.getElementById("usernameStatus").innerText = "Текст базы загружен!";
 }
 
 async function runCheck(mode) {
@@ -106,7 +121,6 @@ async function loadResults() {
     else if (r.status === "DEAD" || r.status === "ERROR") cls = "dead";
     else if (r.status === "SKIP") cls = "skip";
     
-    // Если статус "Проверяю", выводим прогресс из note в колонку "Ждать"
     let waitText = r.wait_seconds ? r.wait_seconds + "с" : "—";
     if (r.status === "Проверяю..." || r.status === "OK" || r.status === "DEAD" || r.status === "ERROR" || r.status === "SKIP") {
        waitText = r.note || "—";
