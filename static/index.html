@@ -2,35 +2,65 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Flood Checker</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  body { font-family: sans-serif; background: #17212b; color: #fff; padding: 12px; }
-  button { padding: 10px 16px; background: #2ea6ff; border: none; color: #fff; border-radius: 8px; font-size: 16px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
-  th, td { padding: 6px; border-bottom: 1px solid #2a3a4a; text-align: left; }
-  .flood { color: #ff6b6b; }
-  .ok { color: #4cd964; }
-  .dead { color: #888; }
+  body { font-family: -apple-system, sans-serif; background: var(--tg-theme-bg-color, #17212b); color: var(--tg-theme-text-color, #fff); padding: 16px; margin: 0; }
+  textarea { width: 100%; height: 100px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 12px; }
+  button { width: 100%; padding: 14px; background: #2ea6ff; border: none; color: #fff; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+  th, td { padding: 8px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; }
+  .flood { color: #ff6b6b; } .ok { color: #4cd964; } .dead { color: #888; }
 </style>
 </head>
 <body>
-  <button onclick="runCheck()">Проверить аккаунты</button>
-  <div id="status"></div>
+  <h3>1. Прокси</h3>
+  <textarea id="proxies" placeholder="host:port:user:pass&#10;host:port:user:pass"></textarea>
+  <button onclick="uploadProxies()">Загрузить прокси</button>
+
+  <h3>2. Сессии</h3>
+  <input type="file" id="zipFile" accept=".zip" style="margin-bottom: 12px; color: #fff;">
+  <button onclick="uploadSessions()">Загрузить ZIP</button>
+  <div id="sessionStatus" style="margin-bottom: 12px; font-size: 14px;"></div>
+
+  <h3>3. Проверка</h3>
+  <button onclick="runCheck()" style="background: #4cd964;">Проверить на флуд</button>
+  <div id="status" style="font-size: 14px; margin-bottom: 12px;"></div>
+
   <table id="table" style="display:none">
     <thead><tr><th>Имя</th><th>Телефон</th><th>Страна</th><th>Статус</th><th>Ждать</th></tr></thead>
     <tbody></tbody>
   </table>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.expand();
 
+async function uploadProxies() {
+  const text = document.getElementById("proxies").value;
+  const formData = new FormData();
+  formData.append("proxies", text);
+  await fetch("/upload/proxies", { method: "POST", body: formData });
+  alert("Прокси загружены!");
+}
+
+async function uploadSessions() {
+  const fileInput = document.getElementById("zipFile");
+  if (!fileInput.files.length) return alert("Выбери ZIP файл");
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  document.getElementById("sessionStatus").innerText = "Загрузка...";
+  const res = await fetch("/upload/sessions", { method: "POST", body: formData });
+  const data = await res.json();
+  document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions.length} сессий`;
+}
+
 async function runCheck() {
-  document.getElementById("status").textContent = "Проверяю...";
+  document.getElementById("status").innerText = "Проверяю... (это займёт время)";
   const res = await fetch("/check");
   const data = await res.json();
-  if (data.status === "busy") { document.getElementById("status").textContent = "Уже идёт проверка"; return; }
+  if (data.status === "busy") { document.getElementById("status").innerText = "Уже идёт проверка"; return; }
   await loadResults();
 }
 
@@ -43,14 +73,12 @@ async function loadResults() {
     const tr = document.createElement("tr");
     const cls = r.status.startsWith("FLOOD") ? "flood" : (r.status === "DEAD" ? "dead" : "ok");
     tr.innerHTML = `<td>${r.name}</td><td>${r.phone}</td><td>${r.country}</td>
-      <td class="${cls}">${r.status}</td><td>${r.wait_seconds ? r.wait_seconds + " сек" : "—"}</td>`;
+      <td class="${cls}">${r.status}</td><td>${r.wait_seconds ? r.wait_seconds + "с" : "—"}</td>`;
     tbody.appendChild(tr);
   });
-  document.getElementById("status").textContent = `Готово. Аккаунтов: ${rows.length}`;
+  document.getElementById("status").innerText = `Готово. Аккаунтов: ${rows.length}`;
   document.getElementById("table").style.display = "table";
 }
-
-loadResults();
 </script>
 </body>
 </html>
