@@ -7,12 +7,12 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; background: var(--tg-theme-bg-color, #17212b); color: var(--tg-theme-text-color, #fff); padding: 16px; margin: 0; }
-  textarea { width: 100%; height: 80px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 12px; }
+  textarea { width: 100%; height: 80px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 8px; font-size: 12px; }
   button { width: 100%; padding: 12px; border: none; color: #fff; border-radius: 8px; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
   .btn-upload { background: #2ea6ff; }
   .btn-valid { background: #ff9f0a; }
   .btn-flood { background: #4cd964; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 11px; }
   th, td { padding: 6px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; }
   .flood { color: #ff6b6b; font-weight: bold; } 
   .ok { color: #4cd964; font-weight: bold; } 
@@ -30,9 +30,14 @@
   <button class="btn-upload" onclick="uploadSessions()">Загрузить ZIP</button>
   <div id="sessionStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
-  <h3>3. Проверка</h3>
+  <h3>3. База юзернеймов (для проверки)</h3>
+  <textarea id="usernames" placeholder="@username1&#10;@username2"></textarea>
+  <button class="btn-upload" onclick="uploadUsernames()">Загрузить базу</button>
+  <div id="usernameStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
+
+  <h3>4. Проверка</h3>
   <button class="btn-valid" onclick="runCheck('valid')">Проверить валидность</button>
-  <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд</button>
+  <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд (поиск)</button>
   
   <div id="status" style="font-size: 12px; margin-bottom: 8px; color: #ff9f0a;"></div>
 
@@ -66,16 +71,24 @@ async function uploadSessions() {
   document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions} сессий.`;
 }
 
+async function uploadUsernames() {
+  const text = document.getElementById("usernames").value;
+  const formData = new FormData();
+  formData.append("usernames", text);
+  await fetch("/upload/usernames", { method: "POST", body: formData });
+  document.getElementById("usernameStatus").innerText = "База загружена!";
+}
+
 async function runCheck(mode) {
   const statusEl = document.getElementById("status");
-  statusEl.innerText = mode === 'valid' ? "Проверяю валидность..." : "Проверяю на флуд...";
+  statusEl.innerText = mode === 'valid' ? "Проверяю валидность..." : "Проверяю на флуд (поиск юзеров)...";
   
   const res = await fetch(`/check?mode=${mode}`);
   const data = await res.json();
   
   if (data.status === "started") {
     if (!pollInterval) {
-      pollInterval = setInterval(loadResults, 3000); // Обновляем каждые 3 секунды
+      pollInterval = setInterval(loadResults, 3000);
     }
   } else if (data.status === "busy") {
     statusEl.innerText = "Уже идёт проверка. Подожди.";
@@ -113,7 +126,6 @@ async function loadResults() {
   }
 }
 
-// При открытии сразу грузим то, что уже есть
 loadResults();
 </script>
 </body>
