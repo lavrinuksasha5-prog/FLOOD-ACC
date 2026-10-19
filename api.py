@@ -32,7 +32,6 @@ async def upload_sessions(file: UploadFile = File(...)):
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": len(files)}
 
-# 🔥 НОВЫЙ ЭНДПОИНТ ДЛЯ БАЗЫ ЮЗЕРНЕЙМОВ
 @app.post("/upload/usernames")
 async def upload_usernames(usernames: str = Form(...)):
     with open("usernames.txt", "w", encoding="utf-8") as f:
@@ -51,7 +50,18 @@ async def run_check_background(mode: str):
             
     try:
         async def update_result(res):
-            _results.append(res)
+            # 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: Ищем существующую строку и обновляем её
+            existing_index = None
+            for i, item in enumerate(_results):
+                if item["session"] == res["session"]:
+                    existing_index = i
+                    break
+            
+            if existing_index is not None:
+                _results[existing_index] = res # Обновляем старую
+            else:
+                _results.append(res) # Добавляем новую
+
         await checker.check_all("sessions", proxies, mode, update_result)
     except Exception as e:
         print(f"Ошибка в фоне: {e}")
