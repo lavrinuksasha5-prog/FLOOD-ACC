@@ -1,7 +1,6 @@
 import asyncio
 import os
 import random
-import aiohttp
 from telethon import TelegramClient, errors
 from telethon.tl.functions.stories import CanSendStoryRequest
 import phonenumbers
@@ -17,17 +16,17 @@ def get_country_code(phone: str) -> str:
     except Exception:
         return "UNKNOWN"
 
-async def get_proxy_country(proxy_str: str) -> str:
-    host = proxy_str.split(":")[0].replace("socks5://", "").replace("http://", "")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://ip-api.com/json/{host}") as resp:
-                data = await resp.json()
-                return data.get("countryCode", "UNKNOWN")
-    except Exception:
-        return "UNKNOWN"
+# Новая функция: берем страну из логина прокси, а не из IP
+def get_proxy_country_from_login(proxy_str: str) -> str:
+    # Ищем в строке паттерн country-XX
+    if "country-" in proxy_str:
+        try:
+            part = proxy_str.split("country-")[1]
+            return part[:2].upper() # Вернет KZ, PT, SE и т.д.
+        except:
+            return "UNKNOWN"
+    return "UNKNOWN"
 
-# Добавили параметр mode
 async def check_one(session_path: str, proxy: dict | None, mode: str):
     client = TelegramClient(session_path, API_ID, API_HASH, proxy=proxy)
     result = {"session": os.path.basename(session_path), "name": "—", "phone": "—", "country": "—", "status": "OK", "wait_seconds": 0, "note": ""}
@@ -43,7 +42,6 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
         result["phone"] = f"+{me.phone}" if me.phone else "—"
         result["country"] = get_country_code(result["phone"])
 
-        # Если выбран режим "flood", проверяем истории
         if mode == "flood":
             try:
                 await client(CanSendStoryRequest(peer=me))
@@ -58,7 +56,6 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
                 result["wait_seconds"] = e.seconds
             except Exception as e:
                 result["note"] = f"canSendStory: {type(e).__name__}"
-        # Если режим "valid", мы просто успешно зашли и вышли, статус останется "OK"
 
     except errors.AuthKeyUnregisteredError:
         result["status"] = "DEAD"
@@ -72,11 +69,12 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
 
 async def check_all(sessions_dir: str, proxies: list[str], mode: str):
     results = []
+    
+    # 1. Собираем страны прокси из логинов
     proxy_countries = {}
     for p in proxies:
-        country = await get_proxy_country(p)
+        country = get_proxy_country_from_login(p)
         proxy_countries[p] = country
-        await asyncio.sleep(1)
 
     sessions = [os.path.join(sessions_dir, f) for f in os.listdir(sessions_dir) if f.endswith(".session")]
 
@@ -93,6 +91,7 @@ async def check_all(sessions_dir: str, proxies: list[str], mode: str):
         acc_country = get_country_code(phone)
         await temp_client.disconnect()
 
+        # 2. Ищем прокси по стране из логина
         chosen_proxy = None
         for p_url, p_country in proxy_countries.items():
             if p_country == acc_country:
@@ -103,18 +102,18 @@ async def check_all(sessions_dir: str, proxies: list[str], mode: str):
             results.append({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси для этой страны"})
             continue
 
-        if "socks5://" in chosen_proxy:
-            parts = chosen_proxy.replace("socks5://", "").split(":")
+        # Парсим прокси в формат Telethon
+        parts = chosen_proxy.split(":")
+        # Если формат host:port:user:pass
+        if len(parts) == 4:
+            proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3])
         else:
-            parts = chosen_proxy.split(":")
-        
-        proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
+            proxy_dict = ("socks5", parts[0], int(parts[1]))
 
         res = await check_one(sess, proxy_dict, mode)
         results.append(res)
         
         if i < len(sessions) - 1:
-            # В режиме валидации можно чуть быстрее, но всё равно безопасно
             sleep_time = random.randint(30, 60) if mode == "valid" else random.randint(60, 120)
             await asyncio.sleep(sleep_time)
             
