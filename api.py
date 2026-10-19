@@ -6,7 +6,6 @@ import checker, asyncio, os, shutil, zipfile
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Глобальные переменные, которые будут хранить состояние
 _results = []
 _running = False
 
@@ -19,7 +18,7 @@ async def upload_proxies(proxies: str = Form(...)):
 @app.post("/upload/sessions")
 async def upload_sessions(file: UploadFile = File(...)):
     os.makedirs("sessions", exist_ok=True)
-    # Очищаем папку перед загрузкой новых
+    # Очищаем папку
     for f in os.listdir("sessions"):
         os.remove(os.path.join("sessions", f))
         
@@ -29,13 +28,16 @@ async def upload_sessions(file: UploadFile = File(...)):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall("sessions")
     os.remove(zip_path)
+    
+    # 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: Даем права на запись всем файлам в папке
+    os.system("chmod -R 777 sessions")
+    
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": len(files)}
 
-# Фоновая задача для проверки
 async def run_check_background(mode: str):
     global _results, _running
-    _results = [] # Очищаем старые результаты
+    _results = []
     _running = True
     
     proxies = []
@@ -44,10 +46,8 @@ async def run_check_background(mode: str):
             proxies = [l.strip() for l in f if l.strip()]
             
     try:
-        # Передаем функцию для обновления результатов "на лету"
         async def update_result(res):
             _results.append(res)
-            
         await checker.check_all("sessions", proxies, mode, update_result)
     except Exception as e:
         print(f"Ошибка в фоне: {e}")
@@ -59,7 +59,6 @@ async def run_check(background_tasks: BackgroundTasks, mode: str = Query("flood"
     global _running
     if _running:
         return {"status": "busy"}
-    
     background_tasks.add_task(run_check_background, mode)
     return {"status": "started"}
 
