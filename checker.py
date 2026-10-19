@@ -7,8 +7,8 @@ import phonenumbers
 API_ID = int(os.getenv("API_ID", 123456))
 API_HASH = os.getenv("API_HASH", "твой_api_hash")
 
-MAX_CONCURRENT_TASKS = 5
-USERS_PER_ACCOUNT = 10 # Сколько юзеров проверять на 1 аккаунт
+MAX_CONCURRENT_TASKS = 10  # 10 аккаунтов ебашат одновременно
+USERS_PER_ACCOUNT = 10     # По 10 юзеров на аккаунт
 
 def get_country_code(phone: str) -> str:
     try:
@@ -49,9 +49,9 @@ async def check_one(session_path: str, proxy: dict | None, usernames_list: list)
                 await client(functions.contacts.ResolveUsernameRequest(username=target_user))
                 checked_count += 1
                 
-                # Правильная задержка между поисками (от 3 до 8 секунд)
+                # 🔥 ЗАДЕРЖКА ОТ 30 ДО 61 СЕКУНДЫ
                 if checked_count < len(test_users):
-                    delay = random.uniform(3.0, 8.0)
+                    delay = random.uniform(30.0, 61.0)
                     await asyncio.sleep(delay)
                     
             except errors.FloodWaitError as e:
@@ -117,7 +117,6 @@ async def worker(queue, proxies_pool, usernames_list, semaphore, update_callback
 
                 res = await check_one(sess, proxy_dict, usernames_list)
                 await update_callback(res)
-                await asyncio.sleep(2)
 
             except Exception as e:
                 res = {"session": os.path.basename(sess), "status": "ERROR", "name": "—", "phone": "—", "country": "—", "note": str(e), "wait_seconds": 0}
