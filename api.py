@@ -17,23 +17,27 @@ async def upload_proxies(proxies: str = Form(...)):
 
 @app.post("/upload/sessions")
 async def upload_sessions(file: UploadFile = File(...)):
-    os.makedirs("sessions", exist_ok=True)
-    # Очищаем папку
-    for f in os.listdir("sessions"):
-        os.remove(os.path.join("sessions", f))
-        
+    if os.path.exists("sessions"):
+        shutil.rmtree("sessions", ignore_errors=True)
+    os.makedirs("sessions", mode=0o777, exist_ok=True)
+    
     zip_path = f"temp_{file.filename}"
     with open(zip_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall("sessions")
     os.remove(zip_path)
-    
-    # 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: Даем права на запись всем файлам в папке
     os.system("chmod -R 777 sessions")
     
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": len(files)}
+
+# 🔥 НОВЫЙ ЭНДПОИНТ ДЛЯ БАЗЫ ЮЗЕРНЕЙМОВ
+@app.post("/upload/usernames")
+async def upload_usernames(usernames: str = Form(...)):
+    with open("usernames.txt", "w", encoding="utf-8") as f:
+        f.write(usernames)
+    return {"status": "ok"}
 
 async def run_check_background(mode: str):
     global _results, _running
