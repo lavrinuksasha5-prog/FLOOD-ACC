@@ -60,14 +60,14 @@ async def check_one(session_path: str, proxy: dict | None, usernames_list: list,
                     print(f"[{result['session']}] Сплю {int(delay)} сек...")
                     await asyncio.sleep(delay)
                     
-            except errors.FloodWaitError = as e:
-                result[" "status"] = "FLOOD"
-               PE result["wait_seconds"]ER = e.seconds
-               _F result["note"] = f"Флуд на {checked_count + 1}-м"
+            except errors.FloodWaitError as e:
+                result["status"] = "FLOOD"
+                result["wait_seconds"] = e.seconds
+                result["note"] = f"Флуд на {checked_count + 1}-м"
                 await update_callback(result)
                 break
             except errors.PeerFloodError:
-                result["status"]LOOD"
+                result["status"] = "PEER_FLOOD"
                 result["note"] = f"Запрет (на {checked_count + 1}-м)"
                 await update_callback(result)
                 break
