@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flood Checker</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { font-family: sans-serif; background: #17212b; color: #fff; padding: 12px; }
+  button { padding: 10px 16px; background: #2ea6ff; border: none; color: #fff; border-radius: 8px; font-size: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { padding: 6px; border-bottom: 1px solid #2a3a4a; text-align: left; }
+  .flood { color: #ff6b6b; }
+  .ok { color: #4cd964; }
+  .dead { color: #888; }
+</style>
+</head>
+<body>
+  <button onclick="runCheck()">Проверить аккаунты</button>
+  <div id="status"></div>
+  <table id="table" style="display:none">
+    <thead><tr><th>Имя</th><th>Телефон</th><th>Страна</th><th>Статус</th><th>Ждать</th></tr></thead>
+    <tbody></tbody>
+  </table>
+<script>
+const tg = window.Telegram.WebApp;
+tg.expand();
+
+async function runCheck() {
+  document.getElementById("status").textContent = "Проверяю...";
+  const res = await fetch("/check");
+  const data = await res.json();
+  if (data.status === "busy") { document.getElementById("status").textContent = "Уже идёт проверка"; return; }
+  await loadResults();
+}
+
+async function loadResults() {
+  const res = await fetch("/results");
+  const rows = await res.json();
+  const tbody = document.querySelector("#table tbody");
+  tbody.innerHTML = "";
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    const cls = r.status.startsWith("FLOOD") ? "flood" : (r.status === "DEAD" ? "dead" : "ok");
+    tr.innerHTML = `<td>${r.name}</td><td>${r.phone}</td><td>${r.country}</td>
+      <td class="${cls}">${r.status}</td><td>${r.wait_seconds ? r.wait_seconds + " сек" : "—"}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById("status").textContent = `Готово. Аккаунтов: ${rows.length}`;
+  document.getElementById("table").style.display = "table";
+}
+
+loadResults();
+</script>
+</body>
+</html>
