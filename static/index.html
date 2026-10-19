@@ -7,34 +7,37 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; background: var(--tg-theme-bg-color, #17212b); color: var(--tg-theme-text-color, #fff); padding: 16px; margin: 0; }
-  textarea { width: 100%; height: 100px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 12px; }
-  button { width: 100%; padding: 14px; border: none; color: #fff; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+  textarea { width: 100%; height: 80px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 12px; }
+  button { width: 100%; padding: 12px; border: none; color: #fff; border-radius: 8px; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
   .btn-upload { background: #2ea6ff; }
   .btn-valid { background: #ff9f0a; }
   .btn-flood { background: #4cd964; }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
-  th, td { padding: 8px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; word-break: break-word; }
-  .flood { color: #ff6b6b; font-weight: bold; } .ok { color: #4cd964; font-weight: bold; } .dead { color: #888; } .skip { color: #ff9f0a; }
+  th, td { padding: 6px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; }
+  .flood { color: #ff6b6b; font-weight: bold; } 
+  .ok { color: #4cd964; font-weight: bold; } 
+  .dead { color: #888; } 
+  .skip { color: #ff9f0a; }
 </style>
 </head>
 <body>
   <h3>1. Прокси</h3>
-  <textarea id="proxies" placeholder="host:port:user:pass&#10;socks5://host:port:user:pass"></textarea>
+  <textarea id="proxies" placeholder="host:port:user:pass"></textarea>
   <button class="btn-upload" onclick="uploadProxies()">Загрузить прокси</button>
 
   <h3>2. Сессии</h3>
-  <input type="file" id="zipFile" accept=".zip" style="margin-bottom: 12px; color: #fff;">
+  <input type="file" id="zipFile" accept=".zip" style="margin-bottom: 8px; color: #fff;">
   <button class="btn-upload" onclick="uploadSessions()">Загрузить ZIP</button>
-  <div id="sessionStatus" style="margin-bottom: 12px; font-size: 14px;"></div>
+  <div id="sessionStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
   <h3>3. Проверка</h3>
-  <button class="btn-valid" onclick="runCheck('valid')">Просто проверить валидность</button>
+  <button class="btn-valid" onclick="runCheck('valid')">Проверить валидность</button>
   <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд</button>
   
-  <div id="status" style="font-size: 14px; margin-bottom: 12px; color: #ff9f0a;"></div>
+  <div id="status" style="font-size: 12px; margin-bottom: 8px; color: #ff9f0a;"></div>
 
-  <table id="table" style="display:none">
-    <thead><tr><th>Имя</th><th>Телефон</th><th>Страна</th><th>Статус</th><th>Ждать</th></tr></thead>
+  <table id="table">
+    <thead><tr><th>Имя</th><th>Тел</th><th>Стр</th><th>Статус</th><th>Ждать</th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -42,12 +45,14 @@
 const tg = window.Telegram.WebApp;
 tg.expand();
 
+let pollInterval = null;
+
 async function uploadProxies() {
   const text = document.getElementById("proxies").value;
   const formData = new FormData();
   formData.append("proxies", text);
   await fetch("/upload/proxies", { method: "POST", body: formData });
-  alert("Прокси загружены! Бот сам определит их страны.");
+  alert("Прокси загружены!");
 }
 
 async function uploadSessions() {
@@ -58,27 +63,36 @@ async function uploadSessions() {
   document.getElementById("sessionStatus").innerText = "Загрузка...";
   const res = await fetch("/upload/sessions", { method: "POST", body: formData });
   const data = await res.json();
-  document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions.length} сессий. Теперь можно проверять.`;
+  document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions} сессий.`;
 }
 
 async function runCheck(mode) {
   const statusEl = document.getElementById("status");
-  statusEl.innerText = mode === 'valid' ? "Проверяю валидность (по очереди)..." : "Проверяю на флуд (это займет время)...";
+  statusEl.innerText = mode === 'valid' ? "Проверяю валидность..." : "Проверяю на флуд...";
+  
   const res = await fetch(`/check?mode=${mode}`);
   const data = await res.json();
-  if (data.status === "busy") { statusEl.innerText = "Уже идёт проверка. Подожди."; return; }
-  await loadResults();
+  
+  if (data.status === "started") {
+    if (!pollInterval) {
+      pollInterval = setInterval(loadResults, 3000); // Обновляем каждые 3 секунды
+    }
+  } else if (data.status === "busy") {
+    statusEl.innerText = "Уже идёт проверка. Подожди.";
+  }
 }
 
 async function loadResults() {
   const res = await fetch("/results");
-  const rows = await res.json();
+  const data = await res.json();
+  
   const tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
-  rows.forEach(r => {
+  
+  data.results.forEach(r => {
     const tr = document.createElement("tr");
     let cls = "ok";
-    if (r.status.includes("FLOOD")) cls = "flood";
+    if (r.status && r.status.includes("FLOOD")) cls = "flood";
     if (r.status === "DEAD" || r.status === "ERROR") cls = "dead";
     if (r.status === "SKIP") cls = "skip";
     
@@ -89,9 +103,18 @@ async function loadResults() {
       <td class="${cls}">${r.status}</td><td>${waitText}</td>`;
     tbody.appendChild(tr);
   });
-  document.getElementById("status").innerText = `Готово. Проверено: ${rows.length}`;
-  document.getElementById("table").style.display = "table";
+
+  if (!data.running) {
+    document.getElementById("status").innerText = `Готово. Проверено: ${data.results.length}`;
+    clearInterval(pollInterval);
+    pollInterval = null;
+  } else {
+    document.getElementById("status").innerText = `Проверяю... Уже готово: ${data.results.length}`;
+  }
 }
+
+// При открытии сразу грузим то, что уже есть
+loadResults();
 </script>
 </body>
 </html>
