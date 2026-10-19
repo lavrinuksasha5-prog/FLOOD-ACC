@@ -10,17 +10,14 @@ from phonenumbers import geocoder
 API_ID = int(os.getenv("API_ID", 123456))
 API_HASH = os.getenv("API_HASH", "твой_api_hash")
 
-# Функция для определения страны аккаунта
 def get_country_code(phone: str) -> str:
     try:
         p = phonenumbers.parse(phone, None)
-        return str(phonenumbers.region_code_for_number(p)) # Вернет PT для Португалии и т.д.
+        return str(phonenumbers.region_code_for_number(p))
     except Exception:
         return "UNKNOWN"
 
-# Функция для получения страны по IP прокси
 async def get_proxy_country(proxy_str: str) -> str:
-    # proxy_str в формате host:port:user:pass или socks5://host:port
     host = proxy_str.split(":")[0].replace("socks5://", "").replace("http://", "")
     try:
         async with aiohttp.ClientSession() as session:
@@ -30,17 +27,10 @@ async def get_proxy_country(proxy_str: str) -> str:
     except Exception:
         return "UNKNOWN"
 
-async def check_one(session_path: str, proxy: dict | None):
+# Добавили параметр mode
+async def check_one(session_path: str, proxy: dict | None, mode: str):
     client = TelegramClient(session_path, API_ID, API_HASH, proxy=proxy)
-    result = {
-        "session": os.path.basename(session_path),
-        "name": "—",
-        "phone": "—",
-        "country": "—",
-        "status": "OK",
-        "wait_seconds": 0,
-        "note": ""
-    }
+    result = {"session": os.path.basename(session_path), "name": "—", "phone": "—", "country": "—", "status": "OK", "wait_seconds": 0, "note": ""}
     try:
         await client.connect()
         if not await client.is_user_authorized():
@@ -53,20 +43,22 @@ async def check_one(session_path: str, proxy: dict | None):
         result["phone"] = f"+{me.phone}" if me.phone else "—"
         result["country"] = get_country_code(result["phone"])
 
-        # Проверка FloodWait
-        try:
-            await client(CanSendStoryRequest(peer=me))
-        except errors.FloodWaitError as e:
-            result["status"] = "FLOOD"
-            result["wait_seconds"] = e.seconds
-        except errors.rpcerrorlist.StorySendFloodWeeklyError as e:
-            result["status"] = "FLOOD_WEEKLY"
-            result["wait_seconds"] = e.seconds
-        except errors.rpcerrorlist.StorySendFloodMonthlyError as e:
-            result["status"] = "FLOOD_MONTHLY"
-            result["wait_seconds"] = e.seconds
-        except Exception as e:
-            result["note"] = f"canSendStory: {type(e).__name__}"
+        # Если выбран режим "flood", проверяем истории
+        if mode == "flood":
+            try:
+                await client(CanSendStoryRequest(peer=me))
+            except errors.FloodWaitError as e:
+                result["status"] = "FLOOD"
+                result["wait_seconds"] = e.seconds
+            except errors.rpcerrorlist.StorySendFloodWeeklyError as e:
+                result["status"] = "FLOOD_WEEKLY"
+                result["wait_seconds"] = e.seconds
+            except errors.rpcerrorlist.StorySendFloodMonthlyError as e:
+                result["status"] = "FLOOD_MONTHLY"
+                result["wait_seconds"] = e.seconds
+            except Exception as e:
+                result["note"] = f"canSendStory: {type(e).__name__}"
+        # Если режим "valid", мы просто успешно зашли и вышли, статус останется "OK"
 
     except errors.AuthKeyUnregisteredError:
         result["status"] = "DEAD"
@@ -78,21 +70,17 @@ async def check_one(session_path: str, proxy: dict | None):
         await client.disconnect()
     return result
 
-async def check_all(sessions_dir: str, proxies: list[str]):
+async def check_all(sessions_dir: str, proxies: list[str], mode: str):
     results = []
-    
-    # 1. Заранее узнаем, из каких стран наши прокси
     proxy_countries = {}
     for p in proxies:
         country = await get_proxy_country(p)
         proxy_countries[p] = country
-        await asyncio.sleep(1) # пауза чтобы ip-api не забанил
+        await asyncio.sleep(1)
 
-    # 2. Находим все сессии
     sessions = [os.path.join(sessions_dir, f) for f in os.listdir(sessions_dir) if f.endswith(".session")]
 
     for i, sess in enumerate(sessions):
-        # Получаем телефон из сессии без подключения к сети, чтобы узнать страну
         temp_client = TelegramClient(sess, API_ID, API_HASH)
         await temp_client.connect()
         if not await temp_client.is_user_authorized():
@@ -105,7 +93,6 @@ async def check_all(sessions_dir: str, proxies: list[str]):
         acc_country = get_country_code(phone)
         await temp_client.disconnect()
 
-        # Ищем подходящий прокси
         chosen_proxy = None
         for p_url, p_country in proxy_countries.items():
             if p_country == acc_country:
@@ -113,31 +100,22 @@ async def check_all(sessions_dir: str, proxies: list[str]):
                 break
         
         if not chosen_proxy:
-            results.append({
-                "session": os.path.basename(sess), 
-                "name": me.first_name or "—", 
-                "phone": phone, 
-                "country": acc_country, 
-                "status": "SKIP", 
-                "note": "Нет прокси для этой страны (защита от бана)"
-            })
+            results.append({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси для этой страны"})
             continue
 
-        # Форматируем прокси для Telethon
         if "socks5://" in chosen_proxy:
             parts = chosen_proxy.replace("socks5://", "").split(":")
-            proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
         else:
-             parts = chosen_proxy.split(":")
-             proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
+            parts = chosen_proxy.split(":")
+        
+        proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
 
-        # 3. Запускаем проверку с правильной задержкой
-        res = await check_one(sess, proxy_dict)
+        res = await check_one(sess, proxy_dict, mode)
         results.append(res)
         
-        # Безопасная задержка: от 60 до 120 секунд
         if i < len(sessions) - 1:
-            sleep_time = random.randint(60, 120)
+            # В режиме валидации можно чуть быстрее, но всё равно безопасно
+            sleep_time = random.randint(30, 60) if mode == "valid" else random.randint(60, 120)
             await asyncio.sleep(sleep_time)
             
     return results
