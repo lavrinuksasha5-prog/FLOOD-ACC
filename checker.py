@@ -9,6 +9,9 @@ from phonenumbers import geocoder
 API_ID = int(os.getenv("API_ID", 123456))
 API_HASH = os.getenv("API_HASH", "твой_api_hash")
 
+# Сколько аккаунтов проверяем ОДНОВРЕМЕННО (чтобы сервер не упал)
+MAX_CONCURRENT_TASKS = 30
+
 def get_country_code(phone: str) -> str:
     try:
         p = phonenumbers.parse(phone, None)
@@ -16,13 +19,10 @@ def get_country_code(phone: str) -> str:
     except Exception:
         return "UNKNOWN"
 
-# Новая функция: берем страну из логина прокси, а не из IP
 def get_proxy_country_from_login(proxy_str: str) -> str:
-    # Ищем в строке паттерн country-XX
     if "country-" in proxy_str:
         try:
-            part = proxy_str.split("country-")[1]
-            return part[:2].upper() # Вернет KZ, PT, SE и т.д.
+            return proxy_str.split("country-")[1][:2].upper()
         except:
             return "UNKNOWN"
     return "UNKNOWN"
@@ -44,13 +44,13 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
 
         if mode == "flood":
             try:
-                await client(CanSendStoryRequest(peer=me))
-            except errors.FloodWaitError as e:
-                result["status"] = "FLOOD"
+                await client( eCanSendStoryRequest(peer=me))
+            except errors.FloodWaitError as. e:
+                resultseconds["status"] = "FLOOD"
                 result["wait_seconds"] = e.seconds
             except errors.rpcerrorlist.StorySendFloodWeeklyError as e:
                 result["status"] = "FLOOD_WEEKLY"
-                result["wait_seconds"] = e.seconds
+                result["wait_seconds"] =
             except errors.rpcerrorlist.StorySendFloodMonthlyError as e:
                 result["status"] = "FLOOD_MONTHLY"
                 result["wait_seconds"] = e.seconds
@@ -67,54 +67,84 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
         await client.disconnect()
     return result
 
+# Воркер, который берет задачи из очереди и выполняет их
+async def worker(queue, proxies_pool, results_list, mode, semaphore):
+    while True:
+        sess = await queue.get()
+        if sess is None:
+            break
+            
+        async with semaphore: # Ограничитель параллельности (30 штук)
+            try:
+                # Определяем страну аккаунта
+                temp_client = TelegramClient(sess, API_ID, API_HASH)
+                await temp_client.connect()
+                if not await temp_client.is_user_authorized():
+                    results_list.append({"session": os.path.basename(sess), "status": "DEAD", "note": "Не авторизована"})
+                    await temp_client.disconnect()
+                    queue.task_done()
+                    continue
+                
+                me = await temp_client.get_me()
+                phone = f"+{me.phone}" if me.phone else ""
+                acc_country = get_country_code(phone)
+                await temp_client.disconnect()
+
+                # Ищем прокси для страны
+                chosen_proxy = None
+                for p_url, p_country in proxies_pool.items():
+                    if p_country == acc_country:
+                        chosen_proxy = p_url
+                        break
+                
+                if not chosen_proxy:
+                    results_list.append({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси"})
+                    queue.task_done()
+                    continue
+
+                # Парсим прокси
+                parts = chosen_proxy.split(":")
+                proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
+
+                # Проверяем
+                res = await check_one(sess, proxy_dict, mode)
+                results_list.append(res)
+                
+                # Небольшая пауза между запросами внутри потока, чтобы не спамить жестко
+                await asyncio.sleep(1) 
+
+            except Exception as e:
+                results_list.append({"session": os.path.basename(sess), "status": "ERROR", "note": str(e)})
+            finally:
+                queue.task_done()
+
 async def check_all(sessions_dir: str, proxies: list[str], mode: str):
     results = []
     
-    # 1. Собираем страны прокси из логинов
-    proxy_countries = {}
+    proxies_pool = {}
     for p in proxies:
-        country = get_proxy_country_from_login(p)
-        proxy_countries[p] = country
+        proxies_pool[p] = get_proxy_country_from_login(p)
 
     sessions = [os.path.join(sessions_dir, f) for f in os.listdir(sessions_dir) if f.endswith(".session")]
+    queue = asyncio.Queue()
+    
+    for sess in sessions:
+        queue.put_nowait(sess)
 
-    for i, sess in enumerate(sessions):
-        temp_client = TelegramClient(sess, API_ID, API_HASH)
-        await temp_client.connect()
-        if not await temp_client.is_user_authorized():
-            results.append({"session": os.path.basename(sess), "status": "DEAD", "note": "Не авторизована"})
-            await temp_client.disconnect()
-            continue
-        
-        me = await temp_client.get_me()
-        phone = f"+{me.phone}" if me.phone else ""
-        acc_country = get_country_code(phone)
-        await temp_client.disconnect()
+    # Создаем ограничитель (не более 30 одновременных проверок)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+    
+    # Запускаем воркеры
+    workers = []
+    for _ in range(MAX_CONCURRENT_TASKS):
+        task = asyncio.create_task(worker(queue, proxies_pool, results, mode, semaphore))
+        workers.append(task)
 
-        # 2. Ищем прокси по стране из логина
-        chosen_proxy = None
-        for p_url, p_country in proxy_countries.items():
-            if p_country == acc_country:
-                chosen_proxy = p_url
-                break
-        
-        if not chosen_proxy:
-            results.append({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси для этой страны"})
-            continue
+    # Ждем завершения всех задач
+    await queue.join()
 
-        # Парсим прокси в формат Telethon
-        parts = chosen_proxy.split(":")
-        # Если формат host:port:user:pass
-        if len(parts) == 4:
-            proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3])
-        else:
-            proxy_dict = ("socks5", parts[0], int(parts[1]))
+    for _ in range(len(workers)):
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
-        res = await check_one(sess, proxy_dict, mode)
-        results.append(res)
-        
-        if i < len(sessions) - 1:
-            sleep_time = random.randint(30, 60) if mode == "valid" else random.randint(60, 120)
-            await asyncio.sleep(sleep_time)
-            
     return results
