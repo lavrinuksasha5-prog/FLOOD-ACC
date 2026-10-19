@@ -8,25 +8,30 @@
 <style>
   body { font-family: -apple-system, sans-serif; background: var(--tg-theme-bg-color, #17212b); color: var(--tg-theme-text-color, #fff); padding: 16px; margin: 0; }
   textarea { width: 100%; height: 100px; background: #232e3c; color: #fff; border: 1px solid #2a3a4a; border-radius: 8px; padding: 8px; box-sizing: border-box; margin-bottom: 12px; }
-  button { width: 100%; padding: 14px; background: #2ea6ff; border: none; color: #fff; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+  button { width: 100%; padding: 14px; border: none; color: #fff; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+  .btn-upload { background: #2ea6ff; }
+  .btn-valid { background: #ff9f0a; }
+  .btn-flood { background: #4cd964; }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
-  th, td { padding: 8px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; }
-  .flood { color: #ff6b6b; } .ok { color: #4cd964; } .dead { color: #888; }
+  th, td { padding: 8px 4px; border-bottom: 1px solid #2a3a4a; text-align: left; word-break: break-word; }
+  .flood { color: #ff6b6b; font-weight: bold; } .ok { color: #4cd964; font-weight: bold; } .dead { color: #888; } .skip { color: #ff9f0a; }
 </style>
 </head>
 <body>
   <h3>1. Прокси</h3>
-  <textarea id="proxies" placeholder="host:port:user:pass&#10;host:port:user:pass"></textarea>
-  <button onclick="uploadProxies()">Загрузить прокси</button>
+  <textarea id="proxies" placeholder="host:port:user:pass&#10;socks5://host:port:user:pass"></textarea>
+  <button class="btn-upload" onclick="uploadProxies()">Загрузить прокси</button>
 
   <h3>2. Сессии</h3>
   <input type="file" id="zipFile" accept=".zip" style="margin-bottom: 12px; color: #fff;">
-  <button onclick="uploadSessions()">Загрузить ZIP</button>
+  <button class="btn-upload" onclick="uploadSessions()">Загрузить ZIP</button>
   <div id="sessionStatus" style="margin-bottom: 12px; font-size: 14px;"></div>
 
   <h3>3. Проверка</h3>
-  <button onclick="runCheck()" style="background: #4cd964;">Проверить на флуд</button>
-  <div id="status" style="font-size: 14px; margin-bottom: 12px;"></div>
+  <button class="btn-valid" onclick="runCheck('valid')">Просто проверить валидность</button>
+  <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд</button>
+  
+  <div id="status" style="font-size: 14px; margin-bottom: 12px; color: #ff9f0a;"></div>
 
   <table id="table" style="display:none">
     <thead><tr><th>Имя</th><th>Телефон</th><th>Страна</th><th>Статус</th><th>Ждать</th></tr></thead>
@@ -42,7 +47,7 @@ async function uploadProxies() {
   const formData = new FormData();
   formData.append("proxies", text);
   await fetch("/upload/proxies", { method: "POST", body: formData });
-  alert("Прокси загружены!");
+  alert("Прокси загружены! Бот сам определит их страны.");
 }
 
 async function uploadSessions() {
@@ -53,14 +58,15 @@ async function uploadSessions() {
   document.getElementById("sessionStatus").innerText = "Загрузка...";
   const res = await fetch("/upload/sessions", { method: "POST", body: formData });
   const data = await res.json();
-  document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions.length} сессий`;
+  document.getElementById("sessionStatus").innerText = `Найдено: ${data.sessions.length} сессий. Теперь можно проверять.`;
 }
 
-async function runCheck() {
-  document.getElementById("status").innerText = "Проверяю... (это займёт время)";
-  const res = await fetch("/check");
+async function runCheck(mode) {
+  const statusEl = document.getElementById("status");
+  statusEl.innerText = mode === 'valid' ? "Проверяю валидность (по очереди)..." : "Проверяю на флуд (это займет время)...";
+  const res = await fetch(`/check?mode=${mode}`);
   const data = await res.json();
-  if (data.status === "busy") { document.getElementById("status").innerText = "Уже идёт проверка"; return; }
+  if (data.status === "busy") { statusEl.innerText = "Уже идёт проверка. Подожди."; return; }
   await loadResults();
 }
 
@@ -71,12 +77,19 @@ async function loadResults() {
   tbody.innerHTML = "";
   rows.forEach(r => {
     const tr = document.createElement("tr");
-    const cls = r.status.startsWith("FLOOD") ? "flood" : (r.status === "DEAD" ? "dead" : "ok");
+    let cls = "ok";
+    if (r.status.includes("FLOOD")) cls = "flood";
+    if (r.status === "DEAD" || r.status === "ERROR") cls = "dead";
+    if (r.status === "SKIP") cls = "skip";
+    
+    let waitText = r.wait_seconds ? r.wait_seconds + "с" : "—";
+    if (r.status === "DEAD" || r.status === "ERROR" || r.status === "SKIP") waitText = r.note || "—";
+
     tr.innerHTML = `<td>${r.name}</td><td>${r.phone}</td><td>${r.country}</td>
-      <td class="${cls}">${r.status}</td><td>${r.wait_seconds ? r.wait_seconds + "с" : "—"}</td>`;
+      <td class="${cls}">${r.status}</td><td>${waitText}</td>`;
     tbody.appendChild(tr);
   });
-  document.getElementById("status").innerText = `Готово. Аккаунтов: ${rows.length}`;
+  document.getElementById("status").innerText = `Готово. Проверено: ${rows.length}`;
   document.getElementById("table").style.display = "table";
 }
 </script>
