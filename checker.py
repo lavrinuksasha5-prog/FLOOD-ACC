@@ -27,7 +27,7 @@ def get_proxy_country_from_login(proxy_str: str) -> str:
 
 async def check_one(session_path: str, proxy: dict | None, usernames_list: list, update_callback):
     client = TelegramClient(session_path, API_ID, API_HASH, proxy=proxy)
-    result = {"session": os.path.basename(session_path), "name": "—", "phone": "—", "country": "—", "status": "Проверяю...", "wait_seconds": 0, "note": ""}
+    result = {"session": os.path.basename(session_path), "name": "—", "phone": "—", "country": "—", "status": "Проверяю...", "wait_seconds": 0, "note": "0/10"}
     
     try:
         await client.connect()
@@ -41,22 +41,18 @@ async def check_one(session_path: str, proxy: dict | None, usernames_list: list,
         result["name"] = me.first_name or me.username or "—"
         result["phone"] = f"+{me.phone}" if me.phone else "—"
         result["country"] = get_country_code(result["phone"])
-        
-        # Сразу отправляем в таблицу, что нашли аккаунт и начали проверку
-        result["note"] = f"0/{USERS_PER_ACCOUNT}"
         await update_callback(result)
 
         test_users = random.sample(usernames_list, min(USERS_PER_ACCOUNT, len(usernames_list)))
-        
         checked_count = 0
+        
         for target_user in test_users:
             try:
                 print(f"[{result['session']}] Ищу @{target_user}...")
                 await client(functions.contacts.ResolveUsernameRequest(username=target_user))
                 checked_count += 1
                 
-                # 🔥 ОБНОВЛЯЕМ ТАБЛИЦУ ПОСЛЕ КАЖДОГО ПОИСКА
-                result["note"] = f"{checked_count}/{USERS_PER_ACCOUNT}"
+                result["note"] = f"{checked_count}/{len(test_users)}"
                 await update_callback(result)
                 
                 if checked_count < len(test_users):
@@ -64,32 +60,32 @@ async def check_one(session_path: str, proxy: dict | None, usernames_list: list,
                     print(f"[{result['session']}] Сплю {int(delay)} сек...")
                     await asyncio.sleep(delay)
                     
-            except errors.FloodWaitError as e:
-                result["status"] = "FLOOD"
-                result["wait_seconds"] = e.seconds
-                result["note"] = f"Флуд на {checked_count + 1}-м юзере"
+            except errors.FloodWaitError = as e:
+                result[" "status"] = "FLOOD"
+               PE result["wait_seconds"]ER = e.seconds
+               _F result["note"] = f"Флуд на {checked_count + 1}-м"
                 await update_callback(result)
                 break
             except errors.PeerFloodError:
-                result["status"] = "PEER_FLOOD"
-                result["note"] = f"Запрет на поиск (на {checked_count + 1}-м)"
+                result["status"]LOOD"
+                result["note"] = f"Запрет (на {checked_count + 1}-м)"
                 await update_callback(result)
                 break
             except Exception as e:
-                result["note"] = f"Ошибка на {checked_count + 1}-м: {type(e).__name__}"
+                result["note"] = f"Ошб: {type(e).__name__}"
                 await update_callback(result)
                 break 
         
         if result["status"] == "Проверяю...":
             result["status"] = "OK"
-            result["note"] = f"Найдено {checked_count}/{USERS_PER_ACCOUNT}"
+            result["note"] = f"Найдено {checked_count}/{len(test_users)}"
 
     except errors.AuthKeyUnregisteredError:
         result["status"] = "DEAD"
-        result["note"] = "AuthKey недействителен"
+        result["note"] = "AuthKey мертв"
     except Exception as e:
         result["status"] = "ERROR"
-        result["note"] = f"{type(e).__name__}: {e}"
+        result["note"] = str(e)
     finally:
         await client.disconnect()
         await update_callback(result)
@@ -100,8 +96,7 @@ async def worker(sess, proxies_pool, usernames_list, update_callback):
         temp_client = TelegramClient(sess, API_ID, API_HASH)
         await temp_client.connect()
         if not await temp_client.is_user_authorized():
-            res = {"session": os.path.basename(sess), "status": "DEAD", "name": "—", "phone": "—", "country": "—", "wait_seconds": 0, "note": "Не авторизована"}
-            await update_callback(res)
+            await update_callback({"session": os.path.basename(sess), "status": "DEAD", "name": "—", "phone": "—", "country": "—", "wait_seconds": 0, "note": "Не авторизована"})
             await temp_client.disconnect()
             return
         
@@ -117,47 +112,33 @@ async def worker(sess, proxies_pool, usernames_list, update_callback):
                 break
         
         if not chosen_proxy:
-            res = {"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси", "wait_seconds": 0}
-            await update_callback(res)
+            await update_callback({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси", "wait_seconds": 0})
             return
 
         parts = chosen_proxy.split(":")
         proxy_dict = ("http", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("http", parts[0], int(parts[1]))
 
-        # Передаем update_callback в check_one
-        res = await check_one(sess, proxy_dict, usernames_list, update_callback)
-        await update_callback(res)
+        await check_one(sess, proxy_dict, usernames_list, update_callback)
 
     except Exception as e:
-        res = {"session": os.path.basename(sess), "status": "ERROR", "name": "—", "phone": "—", "country": "—", "note": str(e), "wait_seconds": 0}
-        await update_callback(res)
-
+        await update_callback({"session": os.path.basename(sess), "status": "ERROR", "name": "—", "phone": "—", "country": "—", "note": str(e), "wait_seconds": 0})
 
 async def check_all(sessions_dir: str, proxies: list[str], mode: str, update_callback):
-    proxies_pool = {}
-    for p in proxies:
-        proxies_pool[p] = get_proxy_country_from_login(p)
+    proxies_pool = {p: get_proxy_country_from_login(p) for p in proxies}
 
     usernames_list = []
     if os.path.exists("usernames.txt"):
         with open("usernames.txt", "r", encoding="utf-8") as f:
             usernames_list = [line.strip().replace("@", "") for line in f if line.strip()]
-    
     if not usernames_list:
         usernames_list = ["durov"]
 
     sessions = [os.path.join(sessions_dir, f) for f in os.listdir(sessions_dir) if f.endswith(".session")]
-    
     BATCH_SIZE = MAX_CONCURRENT_TASKS
     
     for i in range(0, len(sessions), BATCH_SIZE):
         batch = sessions[i:i + BATCH_SIZE]
-        
-        tasks = []
-        for sess in batch:
-            task = asyncio.create_task(worker(sess, proxies_pool, usernames_list, update_callback))
-            tasks.append(task)
-        
+        tasks = [asyncio.create_task(worker(sess, proxies_pool, usernames_list, update_callback)) for sess in batch]
         await asyncio.gather(*tasks)
 
     return True
