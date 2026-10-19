@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 import checker, asyncio, os, shutil, zipfile
@@ -8,6 +8,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 _results = []
 _running = False
+_current_task = None
 
 @app.post("/upload/proxies")
 async def upload_proxies(proxies: str = Form(...)):
@@ -24,22 +25,29 @@ async def upload_sessions(file: UploadFile = File(...)):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall("sessions")
     os.remove(zip_path)
-    # Возвращаем список файлов
-    files = [f for f in os.listdir("sessions") if f.endswith(".session") or os.path.isdir(os.path.join("sessions", f))]
+    files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": files}
 
+# Добавили параметр mode в запрос
 @app.get("/check")
-async def run_check():
+async def run_check(mode: str = Query("flood", description="valid или flood")):
     global _results, _running
     if _running:
         return {"status": "busy"}
+    
     _running = True
     proxies = []
     if os.path.exists("proxies.txt"):
         with open("proxies.txt") as f:
             proxies = [l.strip() for l in f if l.strip()]
-    _results = await checker.check_all("sessions", proxies)
-    _running = False
+            
+    try:
+        _results = await checker.check_all("sessions", proxies, mode)
+    except Exception as e:
+        print("Error:", e)
+    finally:
+        _running = False
+        
     return {"status": "done", "count": len(_results)}
 
 @app.get("/results")
