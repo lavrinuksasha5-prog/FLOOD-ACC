@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 import checker, asyncio, os, shutil, zipfile
@@ -6,9 +6,9 @@ import checker, asyncio, os, shutil, zipfile
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Глобальные переменные, которые будут хранить состояние
 _results = []
 _running = False
-_current_task = None
 
 @app.post("/upload/proxies")
 async def upload_proxies(proxies: str = Form(...)):
@@ -19,6 +19,10 @@ async def upload_proxies(proxies: str = Form(...)):
 @app.post("/upload/sessions")
 async def upload_sessions(file: UploadFile = File(...)):
     os.makedirs("sessions", exist_ok=True)
+    # Очищаем папку перед загрузкой новых
+    for f in os.listdir("sessions"):
+        os.remove(os.path.join("sessions", f))
+        
     zip_path = f"temp_{file.filename}"
     with open(zip_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -26,30 +30,39 @@ async def upload_sessions(file: UploadFile = File(...)):
         zip_ref.extractall("sessions")
     os.remove(zip_path)
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
-    return {"status": "ok", "sessions": files}
+    return {"status": "ok", "sessions": len(files)}
 
-# Добавили параметр mode в запрос
-@app.get("/check")
-async def run_check(mode: str = Query("flood", description="valid или flood")):
+# Фоновая задача для проверки
+async def run_check_background(mode: str):
     global _results, _running
-    if _running:
-        return {"status": "busy"}
-    
+    _results = [] # Очищаем старые результаты
     _running = True
+    
     proxies = []
     if os.path.exists("proxies.txt"):
         with open("proxies.txt") as f:
             proxies = [l.strip() for l in f if l.strip()]
             
     try:
-        _results = await checker.check_all("sessions", proxies, mode)
+        # Передаем функцию для обновления результатов "на лету"
+        async def update_result(res):
+            _results.append(res)
+            
+        await checker.check_all("sessions", proxies, mode, update_result)
     except Exception as e:
-        print("Error:", e)
+        print(f"Ошибка в фоне: {e}")
     finally:
         _running = False
-        
-    return {"status": "done", "count": len(_results)}
+
+@app.get("/check")
+async def run_check(background_tasks: BackgroundTasks, mode: str = Query("flood")):
+    global _running
+    if _running:
+        return {"status": "busy"}
+    
+    background_tasks.add_task(run_check_background, mode)
+    return {"status": "started"}
 
 @app.get("/results")
 async def get_results():
-    return JSONResponse(_results)
+    return JSONResponse({"running": _running, "results": _results})
