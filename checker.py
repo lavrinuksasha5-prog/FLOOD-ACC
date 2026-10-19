@@ -1,7 +1,6 @@
 import asyncio
 import os
-from telethon import TelegramClient, errors
-from telethon.tl.functions.stories import CanSendStoryRequest
+from telethon import TelegramClient, errors, functions
 import phonenumbers
 
 API_ID = int(os.getenv("API_ID", 123456))
@@ -41,8 +40,22 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
 
         if mode == "flood":
             try:
-                await client(CanSendStoryRequest(peer=me))
+                # 🔥 ЗДЕСЬ МЫ ПРОВЕРЯЕМ ТОТ САМЫЙ ФЛУД ПРИ ПОИСКЕ/ОТМЕТКАХ
+                # Пытаемся сделать запрос на поиск пользователя (ResolveUsername)
+                # Если аккаунт в флуде, Telegram выдаст ошибку здесь.
+                if me.username:
+                    await client(functions.contacts.ResolveUsernameRequest(username=me.username))
+                else:
+                    # Если у аккаунта нет юзернейма, пытаемся найти себя по ID
+                    await client.get_entity(me.id)
+                    
             except errors.FloodWaitError as e:
+                result["status"] = "FLOOD"
+                result["wait_seconds"] = e.seconds
+            except errors.PeerFloodError:
+                result["status"] = "PEER_FLOOD"
+                result["note"] = "Запрет на поиск/диалоги"
+            except errors.rpcerrorlist.FloodError as e:
                 result["status"] = "FLOOD"
                 result["wait_seconds"] = e.seconds
             except Exception as e:
@@ -91,7 +104,6 @@ async def worker(queue, proxies_pool, mode, semaphore, update_callback):
                     continue
 
                 parts = chosen_proxy.split(":")
-                # 🔥 МЕНЯЕМ ТИП ПРОКСИ НА HTTP
                 proxy_dict = ("http", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("http", parts[0], int(parts[1]))
 
                 res = await check_one(sess, proxy_dict, mode)
