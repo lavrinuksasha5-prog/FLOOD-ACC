@@ -70,7 +70,7 @@ async def worker(queue, proxies_pool, mode, semaphore, update_callback):
                 await temp_client.connect()
                 if not await temp_client.is_user_authorized():
                     res = {"session": os.path.basename(sess), "status": "DEAD", "name": "—", "phone": "—", "country": "—", "wait_seconds": 0, "note": "Не авторизована"}
-                    await update_callback(res) # Отправляем сразу
+                    await update_callback(res)
                     await temp_client.disconnect()
                     continue
                 
@@ -87,14 +87,15 @@ async def worker(queue, proxies_pool, mode, semaphore, update_callback):
                 
                 if not chosen_proxy:
                     res = {"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси", "wait_seconds": 0}
-                    await update_callback(res) # Отправляем сразу
+                    await update_callback(res)
                     continue
 
                 parts = chosen_proxy.split(":")
-                proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
+                # 🔥 МЕНЯЕМ ТИП ПРОКСИ НА HTTP
+                proxy_dict = ("http", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("http", parts[0], int(parts[1]))
 
                 res = await check_one(sess, proxy_dict, mode)
-                await update_callback(res) # Отправляем результат
+                await update_callback(res)
                 await asyncio.sleep(1) 
 
             except Exception as e:
