@@ -1,10 +1,8 @@
 import asyncio
 import os
-import random
 from telethon import TelegramClient, errors
 from telethon.tl.functions.stories import CanSendStoryRequest
 import phonenumbers
-from phonenumbers import geocoder
 
 API_ID = int(os.getenv("API_ID", 123456))
 API_HASH = os.getenv("API_HASH", "твой_api_hash")
@@ -33,7 +31,7 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
         await client.connect()
         if not await client.is_user_authorized():
             result["status"] = "DEAD"
-            result["note"] = "Сессия не авторизована"
+            result["note"] = "Не авторизована"
             return result
 
         me = await client.get_me()
@@ -48,7 +46,7 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
                 result["status"] = "FLOOD"
                 result["wait_seconds"] = e.seconds
             except Exception as e:
-                result["note"] = f"canSendStory: {type(e).__name__}"
+                result["note"] = f"err: {type(e).__name__}"
 
     except errors.AuthKeyUnregisteredError:
         result["status"] = "DEAD"
@@ -60,7 +58,7 @@ async def check_one(session_path: str, proxy: dict | None, mode: str):
         await client.disconnect()
     return result
 
-async def worker(queue, proxies_pool, results_list, mode, semaphore):
+async def worker(queue, proxies_pool, mode, semaphore, update_callback):
     while True:
         sess = await queue.get()
         if sess is None:
@@ -71,9 +69,9 @@ async def worker(queue, proxies_pool, results_list, mode, semaphore):
                 temp_client = TelegramClient(sess, API_ID, API_HASH)
                 await temp_client.connect()
                 if not await temp_client.is_user_authorized():
-                    results_list.append({"session": os.path.basename(sess), "status": "DEAD", "note": "Не авторизована"})
+                    res = {"session": os.path.basename(sess), "status": "DEAD", "name": "—", "phone": "—", "country": "—", "wait_seconds": 0, "note": "Не авторизована"}
+                    await update_callback(res) # Отправляем сразу
                     await temp_client.disconnect()
-                    queue.task_done()
                     continue
                 
                 me = await temp_client.get_me()
@@ -88,24 +86,24 @@ async def worker(queue, proxies_pool, results_list, mode, semaphore):
                         break
                 
                 if not chosen_proxy:
-                    results_list.append({"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси"})
-                    queue.task_done()
+                    res = {"session": os.path.basename(sess), "name": me.first_name or "—", "phone": phone, "country": acc_country, "status": "SKIP", "note": "Нет прокси", "wait_seconds": 0}
+                    await update_callback(res) # Отправляем сразу
                     continue
 
                 parts = chosen_proxy.split(":")
                 proxy_dict = ("socks5", parts[0], int(parts[1]), True, parts[2], parts[3]) if len(parts) == 4 else ("socks5", parts[0], int(parts[1]))
 
                 res = await check_one(sess, proxy_dict, mode)
-                results_list.append(res)
+                await update_callback(res) # Отправляем результат
                 await asyncio.sleep(1) 
 
             except Exception as e:
-                results_list.append({"session": os.path.basename(sess), "status": "ERROR", "note": str(e)})
+                res = {"session": os.path.basename(sess), "status": "ERROR", "name": "—", "phone": "—", "country": "—", "note": str(e), "wait_seconds": 0}
+                await update_callback(res)
             finally:
                 queue.task_done()
 
-async def check_all(sessions_dir: str, proxies: list[str], mode: str):
-    results = []
+async def check_all(sessions_dir: str, proxies: list[str], mode: str, update_callback):
     proxies_pool = {}
     for p in proxies:
         proxies_pool[p] = get_proxy_country_from_login(p)
@@ -119,7 +117,7 @@ async def check_all(sessions_dir: str, proxies: list[str], mode: str):
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
     workers = []
     for _ in range(MAX_CONCURRENT_TASKS):
-        task = asyncio.create_task(worker(queue, proxies_pool, results, mode, semaphore))
+        task = asyncio.create_task(worker(queue, proxies_pool, mode, semaphore, update_callback))
         workers.append(task)
 
     await queue.join()
@@ -127,4 +125,4 @@ async def check_all(sessions_dir: str, proxies: list[str], mode: str):
         await queue.put(None)
     await asyncio.gather(*workers)
 
-    return results
+    return True
