@@ -23,15 +23,18 @@ async def upload_sessions(file: UploadFile = File(...)):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref: zip_ref.extractall("sessions")
     os.remove(zip_path)
     os.system("chmod -R 777 sessions")
+    
+    # При новой загрузке ZIP очищаем результаты
+    global _results
+    _results = {}
+    
     files = [f for f in os.listdir("sessions") if f.endswith(".session")]
     return {"status": "ok", "sessions": len(files)}
 
-# 🔥 НОВЫЙ ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ ФАЙЛА
 @app.post("/upload/usernames_file")
 async def upload_usernames_file(file: UploadFile = File(...)):
     content = await file.read()
-    with open("usernames.txt", "wb") as f:
-        f.write(content)
+    with open("usernames.txt", "wb") as f: f.write(content)
     return {"status": "ok"}
 
 @app.post("/upload/usernames")
@@ -41,7 +44,7 @@ async def upload_usernames(usernames: str = Form(...)):
 
 async def run_check_background(mode: str):
     global _results, _running
-    _results = {}
+    _results = {}  # Всегда с чистого листа при запуске
     _running = True
     proxies = []
     if os.path.exists("proxies.txt"):
