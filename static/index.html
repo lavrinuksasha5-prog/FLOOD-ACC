@@ -18,6 +18,7 @@
   .ok { color: #4cd964; font-weight: bold; } 
   .dead { color: #888; } 
   .skip { color: #ff9f0a; }
+  .checking { color: #ff9f0a; font-style: italic; }
 </style>
 </head>
 <body>
@@ -30,14 +31,14 @@
   <button class="btn-upload" onclick="uploadSessions()">Загрузить ZIP</button>
   <div id="sessionStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
-  <h3>3. База юзернеймов (для проверки)</h3>
-  <textarea id="usernames" placeholder="@username1&#10;@username2"></textarea>
+  <h3>3. База юзернеймов</h3>
+  <textarea id="usernames" placeholder="username1&#10;username2"></textarea>
   <button class="btn-upload" onclick="uploadUsernames()">Загрузить базу</button>
   <div id="usernameStatus" style="margin-bottom: 8px; font-size: 12px;"></div>
 
   <h3>4. Проверка</h3>
   <button class="btn-valid" onclick="runCheck('valid')">Проверить валидность</button>
-  <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд (поиск)</button>
+  <button class="btn-flood" onclick="runCheck('flood')">Проверить на антифлуд</button>
   
   <div id="status" style="font-size: 12px; margin-bottom: 8px; color: #ff9f0a;"></div>
 
@@ -49,7 +50,6 @@
 <script>
 const tg = window.Telegram.WebApp;
 tg.expand();
-
 let pollInterval = null;
 
 async function uploadProxies() {
@@ -81,15 +81,12 @@ async function uploadUsernames() {
 
 async function runCheck(mode) {
   const statusEl = document.getElementById("status");
-  statusEl.innerText = mode === 'valid' ? "Проверяю валидность..." : "Проверяю на флуд (поиск юзеров)...";
-  
+  statusEl.innerText = mode === 'valid' ? "Проверяю валидность..." : "Проверяю на флуд...";
   const res = await fetch(`/check?mode=${mode}`);
   const data = await res.json();
   
   if (data.status === "started") {
-    if (!pollInterval) {
-      pollInterval = setInterval(loadResults, 3000);
-    }
+    if (!pollInterval) pollInterval = setInterval(loadResults, 2000);
   } else if (data.status === "busy") {
     statusEl.innerText = "Уже идёт проверка. Подожди.";
   }
@@ -98,19 +95,22 @@ async function runCheck(mode) {
 async function loadResults() {
   const res = await fetch("/results");
   const data = await res.json();
-  
   const tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
   
   data.results.forEach(r => {
     const tr = document.createElement("tr");
     let cls = "ok";
-    if (r.status && r.status.includes("FLOOD")) cls = "flood";
-    if (r.status === "DEAD" || r.status === "ERROR") cls = "dead";
-    if (r.status === "SKIP") cls = "skip";
+    if (r.status === "Проверяю...") cls = "checking";
+    else if (r.status.includes("FLOOD")) cls = "flood";
+    else if (r.status === "DEAD" || r.status === "ERROR") cls = "dead";
+    else if (r.status === "SKIP") cls = "skip";
     
+    // Если статус "Проверяю", выводим прогресс из note в колонку "Ждать"
     let waitText = r.wait_seconds ? r.wait_seconds + "с" : "—";
-    if (r.status === "DEAD" || r.status === "ERROR" || r.status === "SKIP") waitText = r.note || "—";
+    if (r.status === "Проверяю..." || r.status === "OK" || r.status === "DEAD" || r.status === "ERROR" || r.status === "SKIP") {
+       waitText = r.note || "—";
+    }
 
     tr.innerHTML = `<td>${r.name}</td><td>${r.phone}</td><td>${r.country}</td>
       <td class="${cls}">${r.status}</td><td>${waitText}</td>`;
@@ -122,7 +122,7 @@ async function loadResults() {
     clearInterval(pollInterval);
     pollInterval = null;
   } else {
-    document.getElementById("status").innerText = `Проверяю... Уже готово: ${data.results.length}`;
+    document.getElementById("status").innerText = `Проверяю... Уже в базе: ${data.results.length}`;
   }
 }
 
